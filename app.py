@@ -217,7 +217,7 @@ embedding_manager = EmbeddingManager()
 
 # VECTOR DATABASE
 class VectorStoreManager:
-    def __init__(self, persist_directory="Data/vector_store", collection_name="pdf_documnets"):
+    def __init__(self, persist_directory="data/vector_store", collection_name="pdf_documnets"):
         self.collection_name = collection_name
         self.persist_directory = persist_directory
         self.collection = None
