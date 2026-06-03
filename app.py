@@ -271,7 +271,6 @@ class VectorStoreManager:
             documents=documents_content,
             embeddings=embeddings_list
         )
-            
         
 vector_store = VectorStoreManager()
 
@@ -280,6 +279,8 @@ if chunks:
     texts = [docs.page_content for docs in chunks]
     embedding = embedding_manager.generate_embedding(texts)
     vector_store.add_documents(chunks, embedding)
+elif chunks:
+    print("Vector store already contains embeddings. Skipping initial indexing.")
 else:
     print("No PDF documents loaded. Vector store is empty.")
 
@@ -294,35 +295,49 @@ class RAGRetriever:
         # query => embedding
         query_embedding = self.embedding_manager.generate_embedding([query])[0]
 
-        # semantic search
+        # request extra neighbors and deduplicate by id so different top_k values return distinct items
+        fetch_k = max(top_k * 2, top_k)
         result = self.vector_store.collection.query(
-            query_embeddings = [query_embedding.tolist()],
-            n_results = top_k
+            query_embeddings=[query_embedding.tolist()],
+            n_results=fetch_k,
         )
 
-        # cosine similarity
         retrieved_docs = []
-        if result["documents"] and result["documents"][0]:
+        seen_ids = set()
+
+        if result.get("documents") and result["documents"] and result["documents"][0]:
             ids = result["ids"][0]
             metadatas = result["metadatas"][0]
             documents = result["documents"][0]
             distances = result["distances"][0]
 
-            for i , (docs_id, metadata, document, distance) in enumerate(zip(ids,metadatas,documents,distances)):
-                similarity_score = 1 - distance
+            for docs_id, metadata, document, distance in zip(ids, metadatas, documents, distances):
+                if docs_id in seen_ids:
+                    continue
+                seen_ids.add(docs_id)
+
+                # Convert distance to similarity (Chroma returns a distance-like measure)
+                try:
+                    similarity_score = 1 - float(distance)
+                except Exception:
+                    similarity_score = float(distance)
 
                 if similarity_score >= score_threshold:
-                    retrieved_docs.append({
-                        "ids" : docs_id,
-                        "metadata" : metadata,
-                        "document" : document,
-                        "similarity_score" : similarity_score,
-                        "distance" : distance,
-                        "rank" : i+1
-                    })
-                    
+                    retrieved_docs.append(
+                        {
+                            "ids": docs_id,
+                            "metadata": metadata,
+                            "document": document,
+                            "similarity_score": similarity_score,
+                            "distance": distance,
+                            "rank": len(retrieved_docs) + 1,
+                        }
+                    )
+
+                if len(retrieved_docs) >= top_k:
+                    break
+
             print(f"retrieved {len(retrieved_docs)} documents")
-            
         else:
             print("no documents found")
 
@@ -369,7 +384,6 @@ def generate_output(query, retriever, llm, top_k=3):
                    Query: {query} """
     response = llm.invoke([prompt.format(context=context, query=query)])   # expecting a list as prompt
     return clean_response(response.content)
-
 
 
 
@@ -461,19 +475,11 @@ with tab_upload:
         if st.button("🔄 Reload Index", use_container_width=True, key="reload_btn"):
             with st.spinner("🔄 Rebuilding vector index..."):
                 all_pdf_document = load_allpdfs()
-                chunks = splits_docs(all_pdf_document)
-                
-                if chunks:
-                    vector_store.collection.delete()
-                    vector_store.collection = vector_store.client.get_or_create_collection(
-                        name=vector_store.collection_name,
-                        metadata={"description": "vectore store collection for pdf embedding in RAG"}
-                    )
-                    texts = [doc.page_content for doc in chunks]
-                    embeddings = embedding_manager.generate_embedding(texts)
-                    vector_store.add_documents(chunks, embeddings)
-                    st.success("✅ Index rebuilt successfully!")
-                else:
+                num_docs, num_chunks = vector_store.rebuild_index(
+                    all_pdf_document, embedding_manager, splits_docs
+                )
+
+                if num_docs == 0:
                     st.warning("⚠️ No PDFs found in data folder")
     
     with col_clear:
