@@ -7,7 +7,6 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import chromadb
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -370,6 +369,11 @@ def generate_output(query, retriever, llm, top_k=3):
                    Query: {query} """
     response = llm.invoke([prompt.format(context=context, query=query)])   # expecting a list as prompt
     return clean_response(response.content)
+
+
+
+
+
 
 
 # STREAMLIT UI
