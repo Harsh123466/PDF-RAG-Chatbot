@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF RAG Analyzer</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: rgba(15, 23, 42, 0.95);
+            --surface: #111827;
+            --primary: #7c3aed;
+            --primary-soft: rgba(124, 58, 237, 0.16);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --border: rgba(148, 163, 184, 0.18);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --radius: 24px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, sans-serif;
+            background: radial-gradient(circle at top, rgba(124, 58, 237, 0.24), transparent 28%),
+                linear-gradient(180deg, #020617 0%, #111827 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px 24px 48px;
+        }
+
+        header {
+            display: grid;
+            gap: 14px;
+            margin-bottom: 32px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: clamp(2.6rem, 2.2rem + 1vw, 3.4rem);
+            line-height: 1.03;
+        }
+
+        header p {
+            margin: 0;
+            max-width: 760px;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.8;
+        }
+
+        .grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .columns-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.18);
+        }
+
+        .panel h2,
+        .panel h3 {
+            margin-top: 0;
+            margin-bottom: 18px;
+        }
+
+        .input-group {
+            display: grid;
+            gap: 16px;
+        }
+
+        .field {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.86);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            color: var(--text);
+            padding: 18px 20px;
+            font-size: 0.98rem;
+            resize: vertical;
+            min-height: 108px;
+        }
+
+        input[type="file"] {
+            color: var(--text);
+        }
+
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        button {
+            border: none;
+            border-radius: 14px;
+            padding: 14px 22px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+            color: white;
+            box-shadow: 0 18px 35px rgba(124, 58, 237, 0.24);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .status-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+
+        .status-card {
+            padding: 22px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .status-card strong {
+            display: block;
+            font-size: 1.05rem;
+            margin-bottom: 10px;
+        }
+
+        .status-card span {
+            display: inline-block;
+            font-size: 2rem;
+            color: white;
+            font-weight: 700;
+        }
+
+        .file-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            display: grid;
+            gap: 8px;
+        }
+
+        .file-list li {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.95rem;
+        }
+
+        .message-box {
+            border-radius: 16px;
+            padding: 18px 20px;
+            margin-top: 20px;
+            display: none;
+            line-height: 1.7;
+        }
+
+        .message-box.visible {
+            display: block;
+        }
+
+        .message-box.success {
+            background: rgba(16, 185, 129, 0.14);
+            border: 1px solid rgba(16, 185, 129, 0.24);
+            color: #bbf7d0;
+        }
+
+        .message-box.error {
+            background: rgba(245, 158, 11, 0.14);
+            border: 1px solid rgba(245, 158, 11, 0.24);
+            color: #fde68a;
+        }
+
+        .answer-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 22px;
+            padding: 24px;
+            min-height: 180px;
+            white-space: pre-wrap;
+        }
+
+        .notes {
+            color: var(--muted);
+            margin-top: 14px;
+            font-size: 0.95rem;
+        }
+
+        footer {
+            margin-top: 42px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 900px) {
+            .columns-3 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <header>
+            <div>
+                <p style="color: var(--primary); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px;">PDF RAG Analyzer</p>
+                <h1>Beautiful HTML interface for your PDF question-answering workflow</h1>
+            </div>
+            <p>Upload PDF documents, rebuild the searchable index, and ask questions with a modern responsive interface.</p>
+        </header>
+
+        <div class="grid columns-3">
+            <section class="panel">
+                <h2>Upload PDFs</h2>
+                <form id="upload-form" class="input-group">
+                    <input id="pdf-files" type="file" name="files" accept="application/pdf" multiple />
+                    <div class="button-row">
+                        <button type="submit" class="btn-primary">Upload Files</button>
+                        <button type="button" id="reload-btn" class="btn-secondary">Reload Index</button>
+                    </div>
+                </form>
+                <div id="upload-message" class="message-box"></div>
+                <p class="notes">After uploading, click reload to rebuild the vector index and make new documents searchable.</p>
+            </section>
+
+            <section class="panel">
+                <h2>Status</h2>
+                <div class="status-grid">
+                    <div class="status-card">
+                        <strong>PDFs loaded</strong>
+                        <span id="pdf-count">{{ total_pdfs }}</span>
+                    </div>
+                    <div class="status-card">
+                        <strong>Indexed embeddings</strong>
+                        <span id="embed-count">{{ total_embeddings }}</span>
+                    </div>
+                    <div class="status-card">
+                        <strong>Ready to ask</strong>
+                        <span id="ready-status">{{ 'Yes' if total_embeddings > 0 else 'No' }}</span>
+                    </div>
+                </div>
+                <div style="margin-top: 24px;">
+                    <h3>Current PDF files</h3>
+                    <ul id="file-list" class="file-list">
+                        {% if pdf_files %}
+                            {% for file in pdf_files %}
+                                <li>{{ file }}</li>
+                            {% endfor %}
+                        {% else %}
+                            <li>No PDF files uploaded yet.</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h2>Need help?</h2>
+                <p class="notes">Use the form below to ask questions about the uploaded PDFs. The app uses retrieval-augmented generation to answer from the indexed document content.</p>
+                <div class="status-card" style="margin-top: 16px;">
+                    <strong>Tips</strong>
+                    <p style="margin: 0; color: var(--muted);">Keep questions short and specific. If answers feel incomplete, rebuild the index after adding new PDFs.</p>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel" style="margin-top: 26px;">
+            <h2>Ask a question</h2>
+            <form id="ask-form" class="input-group">
+                <textarea id="question" class="field" placeholder="Enter a question about your PDF documents..."></textarea>
+                <div class="button-row">
+                    <button type="submit" class="btn-primary">Get Answer</button>
+                </div>
+            </form>
+            <div id="ask-message" class="message-box"></div>
+            <div class="answer-card" id="answer-card">Your answer will appear here.</div>
+        </section>
+
+        <footer>Built with Flask + HTML/CSS/JS · Upload PDFs, rebuild the index, and ask questions in one smooth workflow.</footer>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('upload-form');
+        const askForm = document.getElementById('ask-form');
+        const reloadBtn = document.getElementById('reload-btn');
+        const uploadMessage = document.getElementById('upload-message');
+        const askMessage = document.getElementById('ask-message');
+        const answerCard = document.getElementById('answer-card');
+        const pdfCount = document.getElementById('pdf-count');
+        const embedCount = document.getElementById('embed-count');
+        const readyStatus = document.getElementById('ready-status');
+        const fileList = document.getElementById('file-list');
+
+        function showMessage(element, text, type = 'success') {
+            element.textContent = text;
+            element.className = `message-box visible ${type}`;
+        }
+
+        async function fetchStatus() {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            pdfCount.textContent = data.total_pdfs;
+            embedCount.textContent = data.total_embeddings;
+            readyStatus.textContent = data.total_embeddings > 0 ? 'Yes' : 'No';
+            fileList.innerHTML = data.pdf_files.length
+                ? data.pdf_files.map(name => `<li>${name}</li>`).join('')
+                : '<li>No PDF files uploaded yet.</li>';
+        }
+
+        uploadForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            uploadMessage.className = 'message-box';
+            const filesInput = document.getElementById('pdf-files');
+            const files = filesInput.files;
+            if (!files.length) {
+                showMessage(uploadMessage, 'Please select at least one PDF file to upload.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            for (const file of files) {
+                formData.append('files', file);
+            }
+
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                showMessage(uploadMessage, data.error || 'Upload failed.', 'error');
+                return;
+            }
+
+            showMessage(uploadMessage, data.message, 'success');
+            filesInput.value = null;
+            fetchStatus();
+        });
+
+        reloadBtn.addEventListener('click', async () => {
+            showMessage(uploadMessage, 'Rebuilding index, please wait...', 'success');
+            const response = await fetch('/api/reload', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) {
+                showMessage(uploadMessage, data.error || 'Index reload failed.', 'error');
+                return;
+            }
+            showMessage(uploadMessage, data.message, 'success');
+            fetchStatus();
+        });
+
+        askForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            askMessage.className = 'message-box';
+            answerCard.textContent = 'Working on your answer...';
+            const question = document.getElementById('question').value.trim();
+            if (!question) {
+                showMessage(askMessage, 'Please enter a question first.', 'error');
+                answerCard.textContent = 'Your answer will appear here.';
+                return;
+            }
+
+            const response = await fetch('/api/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                showMessage(askMessage, data.error || 'Unable to generate an answer.', 'error');
+                answerCard.textContent = 'Your answer will appear here.';
+                return;
+            }
+
+            showMessage(askMessage, 'Answer generated successfully.', 'success');
+            answerCard.textContent = data.answer || 'No answer returned.';
+        });
+
+        window.addEventListener('load', fetchStatus);
+    </script>
+</body>
+</html>

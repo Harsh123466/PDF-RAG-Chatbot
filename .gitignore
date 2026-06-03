@@ -1,0 +1,22 @@
+# Environment & API Keys
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Virtual Environment
+venv/
+.venv/
+
+# Local Data
+data/
+Data/vector_store/
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
