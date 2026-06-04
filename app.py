@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import re
+import shutil
 import uuid
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
@@ -271,16 +272,53 @@ class VectorStoreManager:
             documents=documents_content,
             embeddings=embeddings_list
         )
+
+    def clear_collection(self):
+        if self.collection is not None and hasattr(self.collection, "delete"):
+            try:
+                self.collection.delete()
+            except Exception:
+                pass
+
+        if self.client is not None and hasattr(self.client, "delete_collection"):
+            try:
+                self.client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+
+        if os.path.exists(self.persist_directory):
+            try:
+                shutil.rmtree(self.persist_directory)
+            except Exception:
+                pass
+
+        self._initialize_store()
+
+    def rebuild_index(self, documents, embedding_manager, splitter, chunk_size=500, chunk_overlap=50):
+        self.clear_collection()
+
+        if not documents:
+            return 0, 0
+
+        chunked_docs = splitter(documents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        if not chunked_docs:
+            return len(documents), 0
+
+        texts = [doc.page_content for doc in chunked_docs]
+        embeddings = embedding_manager.generate_embedding(texts)
+        self.add_documents(chunked_docs, embeddings)
+        return len(documents), len(chunked_docs)
         
 vector_store = VectorStoreManager()
 
 # Only process embeddings if documents are loaded
 if chunks:
-    texts = [docs.page_content for docs in chunks]
-    embedding = embedding_manager.generate_embedding(texts)
-    vector_store.add_documents(chunks, embedding)
-elif chunks:
-    print("Vector store already contains embeddings. Skipping initial indexing.")
+    if vector_store.collection.count() == 0:
+        texts = [docs.page_content for docs in chunks]
+        embedding = embedding_manager.generate_embedding(texts)
+        vector_store.add_documents(chunks, embedding)
+    else:
+        print("Vector store already contains embeddings. Skipping initial indexing.")
 else:
     print("No PDF documents loaded. Vector store is empty.")
 
@@ -469,26 +507,26 @@ with tab_upload:
     st.divider()
     
     st.markdown("### Manage Index")
-    col_reload, col_clear = st.columns(2)
+    col_reload = st.columns(1)[0]
     
     with col_reload:
         if st.button("🔄 Reload Index", use_container_width=True, key="reload_btn"):
             with st.spinner("🔄 Rebuilding vector index..."):
                 all_pdf_document = load_allpdfs()
                 num_docs, num_chunks = vector_store.rebuild_index(
-                    all_pdf_document, embedding_manager, splits_docs
+                    all_pdf_document,
+                    embedding_manager,
+                    splits_docs,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
                 )
 
                 if num_docs == 0:
                     st.warning("⚠️ No PDFs found in data folder")
-    
-    with col_clear:
-        if st.button("🗑️ Clear All", use_container_width=True, key="clear_btn"):
-            if pdf_files:
-                for file in pdf_files:
-                    os.remove(os.path.join("data", file))
-                st.success("✅ All PDFs cleared!")
-                st.rerun()
+                else:
+                    st.success(f"✅ Rebuilt index for {num_docs} PDFs and {num_chunks} chunks.")
+
+                st.experimental_rerun()
     
     st.divider()
     
