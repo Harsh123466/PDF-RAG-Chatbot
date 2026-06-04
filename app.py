@@ -377,12 +377,12 @@ def generate_output(query, retriever, llm, top_k=3):
     context = "\n".join([doc["document"] for doc in results]) if results else ""
 
     if not context:
-        print("we did not find relevant context for this query")
+        return "❌ No relevant context was found for this query. Please upload PDFs and reload the index, or try a different question."
 
-    prompt = f"""  use given context to generate the answer for the query
-                   Context: {context}
-                   Query: {query} """
-    response = llm.invoke([prompt.format(context=context, query=query)])   # expecting a list as prompt
+    prompt = f"""use the given context to generate the answer for the query
+Context: {context}
+Query: {query}"""
+    response = llm.invoke(prompt)
     return clean_response(response.content)
 
 
