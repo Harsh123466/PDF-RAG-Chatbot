@@ -1,3 +1,5 @@
+from importlib.metadata import metadata
+
 import streamlit as st
 import os
 import re
@@ -6,7 +8,7 @@ import uuid
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import chromadb
 
 # Load environment variables from .env file
@@ -189,7 +191,7 @@ def load_allpdfs():
 all_pdf_document = load_allpdfs()
 
 # CHUNKS
-def splits_docs(document, chunk_size=500, chunk_overlap=50):
+def splits_docs(document, chunk_size=800, chunk_overlap=150):
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size = chunk_size,
@@ -201,9 +203,18 @@ def splits_docs(document, chunk_size=500, chunk_overlap=50):
 
 chunks = splits_docs(all_pdf_document)
 
+
+# # for testing purpose, print the first 5 chunks
+# print("Total chunks:", len(chunks))
+
+# for i in range(min(5, len(chunks))):
+#     print("\n" + "="*80)
+#     print("CHUNK", i)
+#     print(chunks[i].page_content[:1000])
+
 # EMBEDDINGS
 class EmbeddingManager:
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
+    def __init__(self, model_name="BAAI/bge-small-en-v1.5"):    # change model for better embedding all-MiniLM-L6-v2 to BAAI/bge-small-en-v1.5
         self.model_name = model_name
         print("Loading model.....", model_name)
         self.model = SentenceTransformer(self.model_name)
@@ -214,7 +225,21 @@ class EmbeddingManager:
         print("embedding shape", embedding.shape)
         return embedding
     
-embedding_manager = EmbeddingManager()
+
+@st.cache_resource
+def get_embedding_manager():
+    return EmbeddingManager()
+
+# adding reranker for better retrieval performance, this is optional but can improve the quality of retrieved documents
+
+@st.cache_resource
+def get_reranker():
+    return CrossEncoder(
+        "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+
+embedding_manager = get_embedding_manager()
+reranker = get_reranker()
 
 # VECTOR DATABASE
 class VectorStoreManager:
@@ -260,6 +285,8 @@ class VectorStoreManager:
             metadata = dict(docs.metadata)
             metadata["doc_index"] = i
             metadata["content_length"] = len(docs.page_content)
+            metadata["source"] = docs.metadata.get("source", "")
+            metadata["page"] = docs.metadata.get("page", -1)
 
             documents_content.append(docs.page_content)
             all_metadata.append(metadata)
@@ -274,25 +301,18 @@ class VectorStoreManager:
         )
 
     def clear_collection(self):
-        if self.collection is not None and hasattr(self.collection, "delete"):
-            try:
-                self.collection.delete()
-            except Exception:
-                pass
+        try:
+            self.client.delete_collection(self.collection_name)
+        except Exception:
+            pass
 
-        if self.client is not None and hasattr(self.client, "delete_collection"):
-            try:
-                self.client.delete_collection(self.collection_name)
-            except Exception:
-                pass
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={"description": "vector store collection for pdf embedding in RAG"}
+        )
 
-        if os.path.exists(self.persist_directory):
-            try:
-                shutil.rmtree(self.persist_directory)
-            except Exception:
-                pass
-
-        self._initialize_store()
+        print("collection cleared and recreated")
+        print("docs in collection", self.collection.count())
 
     def rebuild_index(self, documents, embedding_manager, splitter, chunk_size=500, chunk_overlap=50):
         self.clear_collection()
@@ -312,15 +332,21 @@ class VectorStoreManager:
 vector_store = VectorStoreManager()
 
 # Only process embeddings if documents are loaded
-if chunks:
-    if vector_store.collection.count() == 0:
-        texts = [docs.page_content for docs in chunks]
-        embedding = embedding_manager.generate_embedding(texts)
-        vector_store.add_documents(chunks, embedding)
-    else:
-        print("Vector store already contains embeddings. Skipping initial indexing.")
+if chunks and vector_store.collection.count() == 0:
+    print("Rebuilding vector index...")
+
+    num_docs, num_chunks = vector_store.rebuild_index(
+        all_pdf_document,
+        embedding_manager,
+        splits_docs,
+        chunk_size=800,
+        chunk_overlap=150
+    )
+
+    print(f"Indexed {num_docs} pages")
+    print(f"Created {num_chunks} chunks")
 else:
-    print("No PDF documents loaded. Vector store is empty.")
+    print("No PDF documents loaded.")
 
 
 # RETRIEVAL PIPELINE
@@ -334,10 +360,10 @@ class RAGRetriever:
         query_embedding = self.embedding_manager.generate_embedding([query])[0]
 
         # request extra neighbors and deduplicate by id so different top_k values return distinct items
-        fetch_k = max(top_k * 2, top_k)
+        fetch_k = 20
         result = self.vector_store.collection.query(
             query_embeddings=[query_embedding.tolist()],
-            n_results=fetch_k,
+            n_results=fetch_k,    # this is change for checking
         )
 
         retrieved_docs = []
@@ -354,32 +380,48 @@ class RAGRetriever:
                     continue
                 seen_ids.add(docs_id)
 
-                # Convert distance to similarity (Chroma returns a distance-like measure)
-                try:
-                    similarity_score = 1 - float(distance)
-                except Exception:
-                    similarity_score = float(distance)
 
-                if similarity_score >= score_threshold:
-                    retrieved_docs.append(
+                retrieved_docs.append(
                         {
                             "ids": docs_id,
                             "metadata": metadata,
                             "document": document,
-                            "similarity_score": similarity_score,
+                            # "similarity_score": similarity_score,
                             "distance": distance,
                             "rank": len(retrieved_docs) + 1,
                         }
                     )
 
-                if len(retrieved_docs) >= top_k:
-                    break
 
             print(f"retrieved {len(retrieved_docs)} documents")
+            print("\nQUERY:", query)
+            print("Collection Count:", self.vector_store.collection.count())
+            
+            # for i, doc in enumerate(retrieved_docs):
+            #     print("\n" + "="*50)
+            #     print(f"Chunk {i+1}")
+            #     print("Page:", doc["metadata"].get("page"))
+            #     print("Distance:", doc["distance"])
+            #     print(doc["document"][:500])
         else:
             print("no documents found")
 
-        return retrieved_docs
+        pairs = [
+            (query, doc["document"])
+            for doc in retrieved_docs
+        ]
+
+        scores = reranker.predict(pairs)
+
+        for doc, score in zip(retrieved_docs, scores):
+            doc["rerank_score"] = float(score)
+
+        retrieved_docs.sort(
+            key=lambda x: x["rerank_score"],
+            reverse=True
+        )
+
+        return retrieved_docs[:top_k]
     
 rag_retriever = RAGRetriever(embedding_manager,vector_store)
 
@@ -417,9 +459,22 @@ def generate_output(query, retriever, llm, top_k=3):
     if not context:
         return "❌ No relevant context was found for this query. Please upload PDFs and reload the index, or try a different question."
 
-    prompt = f"""use the given context to generate the answer for the query
-Context: {context}
-Query: {query}"""
+    prompt = f"""
+You are a PDF question answering assistant.
+
+Answer ONLY from the provided context.
+
+If the answer is not found in the context, say:
+"I could not find this information in the document."
+
+Context:
+{context}
+
+Question:
+{query}
+
+Answer:
+"""
     response = llm.invoke(prompt)
     return clean_response(response.content)
 
@@ -595,8 +650,8 @@ with tab_query:
                         col_rank, col_score = st.columns([1, 3])
                         with col_rank:
                             st.metric("Rank", result["rank"])
-                        with col_score:
-                            st.metric("Similarity", f"{result['similarity_score']:.2%}")
+                        # with col_score:
+                        #     st.metric("Similarity", f"{result['similarity_score']:.2%}")
                         
                         st.markdown(f"**Source:** Page {result['metadata'].get('page', 'N/A')}")
                         st.text_area(
